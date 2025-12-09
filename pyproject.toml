@@ -1,0 +1,14 @@
+[project]
+name = "news-scraper"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "dotenv>=0.9.9",
+    "openai>=2.9.0",
+    "requests>=2.32.5",
+    "rich>=14.2.0",
+    "selenium>=4.39.0",
+]
