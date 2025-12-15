@@ -7,12 +7,27 @@ from selenium.common.exceptions import TimeoutException
 import time
 from pydantic import BaseModel
 
-ai_topic_pages = [
-    "https://www.thetimes.com/topic/artificial-intelligence",
-    "https://www.thesun.co.uk/topic/artificial-intelligence/",
-    "https://www.express.co.uk/latest/artificial-intelligence",
-    "https://www.mirror.co.uk/all-about/artificial-intelligence",
-]
+# ai_topic_pages = [
+#     "https://www.thetimes.com/topic/artificial-intelligence",
+#     "https://www.thesun.co.uk/topic/artificial-intelligence/",
+#     "https://www.express.co.uk/latest/artificial-intelligence",
+#     "https://www.mirror.co.uk/all-about/artificial-intelligence",
+# ]
+
+ai_topic_page_maps = {
+    "thetimes": lambda n : f"https://www.thetimes.com/topic/artificial-intelligence?page={n}",
+    "thesun": lambda n : f"https://www.thesun.co.uk/topic/artificial-intelligence/page/{n}/",
+    "express": lambda n : f"https://www.express.co.uk/latest/artificial-intelligence?pageNumber={n}",
+    "mirror": lambda n : f"https://www.mirror.co.uk/all-about/artificial-intelligence?pageNumber={n}",
+    "telegraph": lambda n : f"https://www.telegraph.co.uk/artificial-intelligence/page-{n}/",
+    "theguardian": lambda n : f"https://www.theguardian.com/technology/artificialintelligenceai?page={n}",
+    "dailymail": lambda n : f"https://www.dailymail.co.uk/sciencetech/ai/index.html?page={n}",
+    "ft": lambda n : f"https://www.ft.com/artificial-intelligence?page={n}",
+    "metro": lambda n : f"https://metro.co.uk/tag/artificial-intelligence/page/{n}/",
+    "independent": lambda n : f"https://www.independent.co.uk/topic/ai",
+    "observer": lambda n : f"https://observer.co.uk/tags/artificial-intelligence/{20*n}",
+    "dailystar": lambda n : f"https://www.dailystar.co.uk/latest/artificial-intelligence?pageNumber={n}",
+}
 
 # https://www.thetimes.com/topic/artificial-intelligence?page=2
 # https://www.thesun.co.uk/topic/artificial-intelligence/page/2/
