@@ -3,14 +3,8 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
 import time
-from pydantic import BaseModel
-
-class Scrape(BaseModel):
-    url: str
-    content: str
-    success: bool
+from utils import Scrape
 
 ARCHIVE_PREFIX = "https://archive.md/"
 
@@ -89,13 +83,11 @@ def scrape_website(driver: webdriver.Chrome, url: str, captcha_wait_time=60) -> 
     print(f"Scraped {len(body_text)} characters.")
     return body_text
         
-def scrape_from_archive(urls: str | list[str]) -> list[Scrape]:
+def scrape_from_archive(driver: webdriver.Chrome, urls: str | list[str]) -> list[Scrape]:
     # Run the scraper
     if isinstance(urls, str):
         urls = [urls]
-        
-    driver = setup_driver()
-    
+            
     scrapes: list[Scrape] = []
     
     for url in urls:
@@ -126,7 +118,9 @@ if __name__ == "__main__":
         "https://www.dailymail.co.uk/sciencetech/article-12068585/What-10-American-cities-look-like-2050-predicted-AI.html",
     ]
     
-    scrape = scrape_from_archive(articles)
+    driver = setup_driver()
+    
+    scrape = scrape_from_archive(driver, articles)
     
     print(scrape[0].url, scrape[0].content[:500])
     

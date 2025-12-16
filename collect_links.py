@@ -1,63 +1,9 @@
 from rich import print
+import time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
-import time
-from datetime import datetime
-from pydantic import BaseModel
 from urllib.parse import urlparse
-import json
-from typing import Callable, Literal
-from pathlib import Path
-
-class LinkData(BaseModel):
-    text: str
-    href: str
-
-Paper = Literal[
-    "thetimes",
-    "thesun",
-    "express",
-    "mirror",
-    "telegraph",
-    "theguardian",
-    "dailymail",
-    "ft",
-    "metro",
-    "independent",
-    "observer",
-    "dailystar",
-]
-
-ai_topic_page_maps: dict[Paper, Callable[[int], str]] = {
-    "thetimes": lambda n : f"https://www.thetimes.com/topic/artificial-intelligence?page={n}",
-    "thesun": lambda n : f"https://www.thesun.co.uk/topic/artificial-intelligence/page/{n}/",
-    "express": lambda n : f"https://www.express.co.uk/latest/artificial-intelligence?pageNumber={n}",
-    "mirror": lambda n : f"https://www.mirror.co.uk/all-about/artificial-intelligence?pageNumber={n}",
-    "telegraph": lambda n : f"https://www.telegraph.co.uk/artificial-intelligence/page-{n}/",
-    "theguardian": lambda n : f"https://www.theguardian.com/technology/artificialintelligenceai?page={n}",
-    "dailymail": lambda n : f"https://www.dailymail.co.uk/sciencetech/ai/index.html?page={n}",
-    "ft": lambda n : f"https://www.ft.com/artificial-intelligence?page={n}",
-    "metro": lambda n : f"https://metro.co.uk/tag/artificial-intelligence/page/{n}/",
-    "independent": lambda n : f"https://www.independent.co.uk/topic/ai",
-    "observer": lambda n : f"https://observer.co.uk/tags/artificial-intelligence/{20*n}",
-    "dailystar": lambda n : f"https://www.dailystar.co.uk/latest/artificial-intelligence?pageNumber={n}",
-}
-
-# https://www.thetimes.com/topic/artificial-intelligence?page=2
-# https://www.thesun.co.uk/topic/artificial-intelligence/page/2/
-# https://www.express.co.uk/latest/artificial-intelligence?pageNumber=2
-# https://www.mirror.co.uk/all-about/artificial-intelligence?pageNumber=2
-# https://www.telegraph.co.uk/artificial-intelligence/page-2/
-# https://www.theguardian.com/technology/artificialintelligenceai?page=2
-# https://www.dailymail.co.uk/sciencetech/ai/index.html?page=2
-# https://www.ft.com/artificial-intelligence?page=2
-# https://metro.co.uk/tag/artificial-intelligence/page/2/
-# https://www.independent.co.uk/topic/ai
-# https://observer.co.uk/tags/artificial-intelligence/80
-# https://www.dailystar.co.uk/latest/artificial-intelligence?pageNumber=2
+from utils import LinkData, SmartLinkScrapeResult, Paper, LinkScheme, write_link_scrape, read_link_scrape, link_scrape_filename
 
 def setup_driver():
     """Initialize and configure the Chrome WebDriver"""
@@ -123,7 +69,7 @@ def merge_links(old_links:list[LinkData], new_links:list[LinkData]) -> tuple[boo
     
     return merged, links
     
-def collect_link_scheme(driver: webdriver.Chrome, link_scheme: Callable[[int], str], page_limit = 10):
+def collect_link_scheme(driver: webdriver.Chrome, link_scheme: LinkScheme, page_limit = 10):
     # iterate through page numbers while we are getting new links
     links = []
     for n in range(1, page_limit+1):
@@ -133,13 +79,7 @@ def collect_link_scheme(driver: webdriver.Chrome, link_scheme: Callable[[int], s
             break
     return links
 
-class SmartLinkScrapeResult(BaseModel):
-    schema_links: list[LinkData]
-    multiple_links: list[LinkData]
-    all_links: list[LinkData]
-    once_links: list[LinkData]
-
-def smart_collect_link_scheme(driver: webdriver.Chrome, link_scheme: Callable[[int], str], page_limit = 10):
+def smart_collect_link_scheme(driver: webdriver.Chrome, link_scheme: LinkScheme, page_limit = 10):
     # iterate through page numbers while we are getting new links
     # maintain the history of all scraped links
     links:list[LinkData] = []
@@ -177,25 +117,6 @@ def smart_collect_link_scheme(driver: webdriver.Chrome, link_scheme: Callable[[i
         once_links=once_scraped_links
     )
 
-def write_link_scrape(slsr: SmartLinkScrapeResult, filename: str):
-    path = Path("scrapes/links") / filename
-    with open(path, "w") as outfile:
-        outfile.write(
-            slsr.model_dump_json(indent=4)
-        )
-
-def read_link_scrape(filename: str) -> SmartLinkScrapeResult:
-    path = Path("scrapes/links") / filename
-    with open(path, "r") as outfile:
-        contents = outfile.read()
-    slsr = SmartLinkScrapeResult.model_validate_json(contents)
-    return slsr
-
-def scrape_filename(paper: Paper, page_limit: int, date=None) -> str:
-    if date is None:
-        date = datetime.now().date().isoformat()
-    return f"scrape-{paper}-{page_limit}-pages-{date}.json"
-
 if __name__ == "__main__":
     driver = setup_driver()
     # Collect links from a webpage
@@ -210,9 +131,8 @@ if __name__ == "__main__":
     #     json.dump(links, outfile, indent=4)
         
     # Collect paginated links with some more link filtering
-    # url_scheme = ai_topic_page_maps["express"]
-    
-    PAPER = "ft"
+    from utils import ai_topic_page_maps
+    PAPER:Paper = "ft"
     PAGE_LIMIT = 4
     url_scheme = ai_topic_page_maps["ft"]
     scrape_result= smart_collect_link_scheme(driver, url_scheme, page_limit=4)
@@ -225,8 +145,8 @@ if __name__ == "__main__":
         scrape_result.multiple_links,
     )
     
-    write_link_scrape(scrape_result, scrape_filename(paper=PAPER, page_limit=PAGE_LIMIT))
+    write_link_scrape(scrape_result, link_scrape_filename(paper=PAPER, page_limit=PAGE_LIMIT))
     
-    slsr = read_link_scrape(scrape_filename(paper=PAPER, page_limit=PAGE_LIMIT))
+    slsr = read_link_scrape(link_scrape_filename(paper=PAPER, page_limit=PAGE_LIMIT))
     
     print(slsr)
