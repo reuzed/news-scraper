@@ -6,6 +6,13 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 import time
 from pydantic import BaseModel
+from urllib.parse import urlparse
+import json
+from typing import Callable
+
+class LinkData(BaseModel):
+    text: str
+    href: str
 
 # ai_topic_pages = [
 #     "https://www.thetimes.com/topic/artificial-intelligence",
@@ -59,36 +66,25 @@ def scrape_body_text(driver: webdriver.Chrome) -> str:
     body = driver.find_element(by=By.CLASS_NAME, value="body")
     return body.text
 
-def find_archive_page_link(driver: webdriver.Chrome) -> str:
-    # When we are on archive.md page, we want to click the archive link to get to our article
-    links = driver.find_elements(By.XPATH, "//a[contains(@href, 'archive.md')]")
-        
-    if len(links) == 0:
-        time.sleep(10)
-        links = driver.find_elements(By.XPATH, "//a[contains(@href, 'archive.md')]")
-    
-    # All the bad archive links have a webpage after https://archive.md, we can find this by looking for a . after md
-    link_texts = list(map(lambda l: l.get_attribute('href'), links))
-    # print("found", len(links), "links", link_texts)
+def scrape_all_links(driver: webdriver.Chrome) -> list[LinkData]:
+    links = driver.find_elements(By.XPATH, "//a")
+    link_datas = []
+    for link in links:
+        href = link.get_attribute("href")
+        if not href:
+            continue
+        link_datas.append(
+            LinkData(text=link.text, href=href)
+        )
+    return link_datas
 
-    good_link_texts = list(filter(lambda lt: '.' not in lt.split("md")[1], link_texts)) # type: ignore
-    good_link_text = good_link_texts[0]
-    # print("good links", len(good_link_texts), good_link_text)
-    if good_link_text is None:
-        print()
-        raise ValueError("No link found")
-    return good_link_text
+def href_base(href: str) -> str:
+    parsed = urlparse(href)
+    return parsed.netloc
 
-def scrape_website(driver: webdriver.Chrome, url: str, captcha_wait_time=60) -> str:
+def collect_links(driver: webdriver.Chrome, url: str):
     """
-    Navigate to a website, click a link, wait for CAPTCHA, and scrape body text
-    
-    Args:
-        url: The initial URL to visit
-        captcha_wait_time: Maximum time to wait for CAPTCHA completion (seconds)
-    
-    Returns:
-        The scraped body text as a string
+    Navigate to a news website ai page
     """    
     time.sleep(1)
     
@@ -96,24 +92,95 @@ def scrape_website(driver: webdriver.Chrome, url: str, captcha_wait_time=60) -> 
     print(f"Navigating to {url}...")
     driver.get(url)
     
-    WebDriverWait(driver, captcha_wait_time).until(
-        EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'archive.md')]"))
-    )
-    
     time.sleep(2)  # Brief wait for page load
     
-    good_link_text = find_archive_page_link(driver)
+    links = scrape_all_links(driver)
     
-    # Go to archived page
-    print(f"Navigating to {good_link_text}...")
-    driver.get(good_link_text)
+    # Filter out links that are not to the same webpage
+    links = list(filter(lambda link : href_base(link.href) == href_base(url), links))
+    return links
+
+def merge_links(old_links:list[LinkData], new_links:list[LinkData]) -> tuple[bool, list[LinkData]]:
+    # Merge links by href, and return a bool representing any links were merged
+    links = old_links
+    old_length = len(old_links)
+    for new_link in new_links:
+        if new_link.href in [link.href for link in links]:
+            continue
+        links.append(new_link)
     
-    time.sleep(2) # Wait for page load again
+    merged = len(links) > old_length
     
-    # Scrape the body text
-    print("Scraping body text...")
-    body_text = scrape_body_text(driver)
+    return merged, links
     
-    print(f"Scraped {len(body_text)} characters.")
-    return body_text
+def collect_link_scheme(driver: webdriver.Chrome, link_scheme: Callable[[int], str], page_limit = 10):
+    # iterate through page numbers while we are getting new links
+    links = []
+    for n in range(1, page_limit+1):
+        new_links = collect_links(driver, link_scheme(n))
+        merged, links = merge_links(links, new_links)
+        if not merged:
+            break
+    return links
+
+def smart_collect_link_scheme(driver: webdriver.Chrome, link_scheme: Callable[[int], str], page_limit = 10):
+    # iterate through page numbers while we are getting new links
+    # maintain the history of all scraped links
+    links:list[LinkData] = []
+    scrape_history:list[list[LinkData]] = []
+    for n in range(1, page_limit+1):
+        new_links = collect_links(driver, link_scheme(n))
+        merged, links = merge_links(links, new_links)
+        if not merged:
+            break
+        scrape_history.append(new_links)
+    # we can reject the links matching our link scheme (this matches sub and superstrings too)
+    def matches_scheme(href:str, n:int):
+        for i in range(1,n+1):
+            if href in link_scheme(i) or link_scheme(i) in href:
+                return True
+        return False
+    # we can reject links that appear on all pages
+    # we can mark links that appear on multiple but not all pages for testing
+    def count_scrapes(href:str, scrape_history:list[list[LinkData]]):
+        total = 0 
+        for scrape in scrape_history:
+            if href in [link.href for link in scrape]:
+                total += 1
+        return total
+    schema_links = list(filter(lambda link: matches_scheme(link.href, len(scrape_history)), links))
+    links = list(filter(lambda link: not matches_scheme(link.href, len(scrape_history)), links))
+    
+    once_scraped_links = list(filter(lambda link: count_scrapes(link.href, scrape_history) == 1, links))
+    multiple_scraped_links = list(filter(lambda link: 1 < count_scrapes(link.href, scrape_history) < len(scrape_history), links))
+    always_scraped_links = list(filter(lambda link: count_scrapes(link.href, scrape_history) == len(scrape_history), links))
+    return schema_links, always_scraped_links, multiple_scraped_links, once_scraped_links
   
+if __name__ == "__main__":
+    driver = setup_driver()
+    # Collect links from a webpage
+    # url = ai_topic_page_maps["express"](2)
+    # links = collect_links(driver, url)
+    
+    # Collect paginated links from a scheme
+    # url_scheme = ai_topic_page_maps["express"]
+    # links = collect_link_scheme(driver, url_scheme, page_limit=10)
+    # with open("collected_links.json", "w") as outfile:
+    #     links = list([link.model_dump() for link in links])
+    #     json.dump(links, outfile, indent=4)
+        
+    # Collect paginated links with some more link filtering
+    # url_scheme = ai_topic_page_maps["express"]
+    url_scheme = ai_topic_page_maps["ft"]
+    schema_links, always_scraped_links, multiple_scraped_links, once_scraped_links = smart_collect_link_scheme(driver, url_scheme, page_limit=4)
+    print(
+        "Schema:" + "-"*30,
+        schema_links, 
+        "Every page:" + "-"*30,
+        always_scraped_links, 
+        "Multiple pages:" + "-"*30,
+        multiple_scraped_links
+    )
+    with open("collected_links2.json", "w") as outfile:
+        links = list([link.model_dump() for link in once_scraped_links])
+        json.dump(links, outfile, indent=4)
