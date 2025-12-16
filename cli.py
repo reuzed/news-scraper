@@ -1,9 +1,9 @@
 import typer
 from pathlib import Path
 from rich import print as rprint
-from collect_links import setup_driver, smart_collect_link_scheme, ai_topic_page_maps
+from collect_links import setup_driver, smart_collect_link_scheme
 from utils import (
-    glob_articles, glob_links, PAPERS, Paper, get_batch_id, parse_link_scrape_filename,
+    ai_topic_page_maps,glob_articles, glob_links, PAPERS, Paper, get_batch_id, parse_link_scrape_filename,
     parse_article_scrape_filename, clean_link_scrape_exists, article_scrape_exists,
     clean_article_scrape_exists, get_link_scrapes_for_batch, get_clean_link_scrapes_for_batch,
     get_article_scrapes_for_batch, get_clean_article_scrapes_for_batch,

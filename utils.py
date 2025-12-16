@@ -1,4 +1,4 @@
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 import re
 from pathlib import Path
 from typing import Callable, Literal, get_args
@@ -90,10 +90,38 @@ def read_link_scrape(filename: str) -> SmartLinkScrapeResult:
 
 LinkDataList = TypeAdapter(list[LinkData])
 
+def canonicalize_url(url: str) -> str:
+    """Canonicalize a URL by removing fragments and normalizing.
+    This removes #comments, #section, etc. to prevent duplicates."""
+    parsed = urlparse(url)
+    # Remove fragment (everything after #)
+    canonical = urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        parsed.query,
+        ''  # Remove fragment
+    ))
+    return canonical
+
 def write_clean_link_scrape(links: list[LinkData], filename: str):
+    """Write clean link scrape, deduplicating by canonical URL"""
+    # Canonicalize URLs and deduplicate
+    seen_canonical_urls = set()
+    deduplicated_links = []
+    
+    for link in links:
+        canonical_url = canonicalize_url(link.href)
+        if canonical_url not in seen_canonical_urls:
+            seen_canonical_urls.add(canonical_url)
+            # Update the link's href to the canonical version
+            deduplicated_link = LinkData(text=link.text, href=canonical_url)
+            deduplicated_links.append(deduplicated_link)
+    
     path = CLEAN_LINK_SCRAPE_DIR / filename
     with open(path, "w") as outfile:
-        outfile.write(LinkDataList.dump_json(links, indent=4).decode())
+        outfile.write(LinkDataList.dump_json(deduplicated_links, indent=4).decode())
 
 def read_clean_link_scrape(filename: str) -> list[LinkData]:
     path = CLEAN_LINK_SCRAPE_DIR / filename
@@ -160,16 +188,30 @@ def parse_link_scrape_filename(filename: str) -> tuple[Paper | None, int | None,
 
 def parse_article_scrape_filename(filename: str) -> tuple[Paper | None, str | None]:
     """Parse article scrape filename to extract paper and batch_id.
-    Format: {paper}-{slug}-{batch_id}.json
+    Format: {paper}-{slug}-{batch_id}.json where batch_id is YYYY-MM-DD
     Returns (paper, batch_id) or (None, None) if parsing fails"""
-    # Extract batch_id (last part before .json)
-    parts = filename.replace(".json", "").split("-")
-    if len(parts) >= 2:
-        # Batch_id is the last part
-        batch_id = parts[-1]
-        # Paper is the first part
+    # Remove .json extension
+    name_without_ext = filename.replace(".json", "")
+    
+    # Batch_id is always in format YYYY-MM-DD at the end
+    # Use regex to find date pattern at the end
+    date_pattern = r'(\d{4}-\d{2}-\d{2})$'
+    match = re.search(date_pattern, name_without_ext)
+    if not match:
+        return (None, None)
+    
+    batch_id = match.group(1)
+    # Remove batch_id from the name to get paper-slug
+    remaining = name_without_ext[:match.start()]
+    
+    # Paper is the first part before the first dash after removing batch_id
+    # But we need to be careful - the slug can contain dashes
+    # So we check if the first part (before first dash) is a valid paper
+    parts = remaining.split("-", 1)
+    if len(parts) >= 1:
         paper = parts[0] if parts[0] in PAPERS else None
         return (paper, batch_id)
+    
     return (None, None)
 
 def clean_link_scrape_exists(filename: str) -> bool:
