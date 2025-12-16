@@ -58,16 +58,19 @@ class SmartLinkScrapeResult(BaseModel):
 class ScrapeData(BaseModel):
     url: str
     content: str
+    is_article: bool = True  # True if this is a valid article, False if it's a listing page or non-article content
     
 class Scrape(ScrapeData):
     success: bool
 
 def glob_articles():
+    """Get all article scrape files, searching recursively in batch_id subdirectories"""
     articles_dir = Path("scrapes/articles")
     article_paths = list(articles_dir.rglob("*.json"))
     return article_paths
 
 def glob_links(paper:Paper|None=None):
+    """Get all link scrape files, searching recursively in batch_id subdirectories"""
     links_dir = Path("scrapes/links")
     links_paths = list(links_dir.rglob("*.json"))
     if paper is not None:
@@ -75,14 +78,21 @@ def glob_links(paper:Paper|None=None):
     return links_paths
 
 def write_link_scrape(slsr: SmartLinkScrapeResult, filename: str):
-    path = LINK_SCRAPE_DIR / filename
+    path = get_link_scrape_path(filename, LINK_SCRAPE_DIR)
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as outfile:
         outfile.write(
             slsr.model_dump_json(indent=4)
         )
 
 def read_link_scrape(filename: str) -> SmartLinkScrapeResult:
-    path = LINK_SCRAPE_DIR / filename
+    # Try new location first (with batch_id subdirectory), then fallback to old location
+    path = get_link_scrape_path(filename, LINK_SCRAPE_DIR)
+    if not path.exists():
+        # Fallback to old location for backward compatibility
+        old_path = LINK_SCRAPE_DIR / filename
+        if old_path.exists():
+            path = old_path
     with open(path, "r") as outfile:
         contents = outfile.read()
     slsr = SmartLinkScrapeResult.model_validate_json(contents)
@@ -119,12 +129,19 @@ def write_clean_link_scrape(links: list[LinkData], filename: str):
             deduplicated_link = LinkData(text=link.text, href=canonical_url)
             deduplicated_links.append(deduplicated_link)
     
-    path = CLEAN_LINK_SCRAPE_DIR / filename
+    path = get_link_scrape_path(filename, CLEAN_LINK_SCRAPE_DIR)
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as outfile:
         outfile.write(LinkDataList.dump_json(deduplicated_links, indent=4).decode())
 
 def read_clean_link_scrape(filename: str) -> list[LinkData]:
-    path = CLEAN_LINK_SCRAPE_DIR / filename
+    # Try new location first (with batch_id subdirectory), then fallback to old location
+    path = get_link_scrape_path(filename, CLEAN_LINK_SCRAPE_DIR)
+    if not path.exists():
+        # Fallback to old location for backward compatibility
+        old_path = CLEAN_LINK_SCRAPE_DIR / filename
+        if old_path.exists():
+            path = old_path
     with open(path, "r") as outfile:
         contents = outfile.read()
     return LinkDataList.validate_json(contents)
@@ -134,25 +151,63 @@ def link_scrape_filename(paper: Paper, page_limit: int, batch_id: str|None = Non
         batch_id = datetime.now().date().isoformat()
     return f"scrape-{paper}-{page_limit}-pages-{batch_id}.json"
 
+def _get_batch_id_from_link_filename(filename: str) -> str | None:
+    """Extract batch_id from link scrape filename"""
+    _, _, batch_id = parse_link_scrape_filename(filename)
+    return batch_id
+
+def _get_batch_id_from_article_filename(filename: str) -> str | None:
+    """Extract batch_id from article scrape filename"""
+    _, batch_id = parse_article_scrape_filename(filename)
+    return batch_id
+
+def get_link_scrape_path(filename: str, base_dir: Path) -> Path:
+    """Get path for link scrape file, including batch_id subdirectory"""
+    batch_id = _get_batch_id_from_link_filename(filename)
+    if batch_id:
+        return base_dir / batch_id / filename
+    # Fallback: if we can't parse batch_id, use old location
+    return base_dir / filename
+
+def get_article_scrape_path(filename: str, base_dir: Path) -> Path:
+    """Get path for article scrape file, including batch_id subdirectory"""
+    batch_id = _get_batch_id_from_article_filename(filename)
+    if batch_id:
+        return base_dir / batch_id / filename
+    # Fallback: if we can't parse batch_id, use old location
+    return base_dir / filename
+
 def write_article_scrape(scrape: Scrape, filename: str):
-    path = ARTICLE_SCRAPE_DIR / filename
+    path = get_article_scrape_path(filename, ARTICLE_SCRAPE_DIR)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         f.write(scrape.model_dump_json(indent=2))
 
 def read_article_scrape(filename: str) -> Scrape:
-    path = ARTICLE_SCRAPE_DIR / filename
+    # Try new location first (with batch_id subdirectory), then fallback to old location
+    path = get_article_scrape_path(filename, ARTICLE_SCRAPE_DIR)
+    if not path.exists():
+        # Fallback to old location for backward compatibility
+        old_path = ARTICLE_SCRAPE_DIR / filename
+        if old_path.exists():
+            path = old_path
     with open(path, "r") as f:
         return Scrape.model_validate_json(f.read())
 
 def write_clean_article_scrape(scrape: ScrapeData, filename: str):
-    path = CLEAN_ARTICLE_SCRAPE_DIR / filename
+    path = get_article_scrape_path(filename, CLEAN_ARTICLE_SCRAPE_DIR)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         f.write(scrape.model_dump_json(indent=2))
 
 def read_clean_article_scrape(filename: str) -> ScrapeData:
-    path = CLEAN_ARTICLE_SCRAPE_DIR / filename
+    # Try new location first (with batch_id subdirectory), then fallback to old location
+    path = get_article_scrape_path(filename, CLEAN_ARTICLE_SCRAPE_DIR)
+    if not path.exists():
+        # Fallback to old location for backward compatibility
+        old_path = CLEAN_ARTICLE_SCRAPE_DIR / filename
+        if old_path.exists():
+            path = old_path
     with open(path, "r") as f:
         return ScrapeData.model_validate_json(f.read())
 
@@ -188,46 +243,46 @@ def parse_link_scrape_filename(filename: str) -> tuple[Paper | None, int | None,
 
 def parse_article_scrape_filename(filename: str) -> tuple[Paper | None, str | None]:
     """Parse article scrape filename to extract paper and batch_id.
-    Format: {paper}-{slug}-{batch_id}.json where batch_id is YYYY-MM-DD
-    Returns (paper, batch_id) or (None, None) if parsing fails"""
-    # Remove .json extension
+    Format: {paper}-{slug}-{batch_id}.json
+    Returns (paper, batch_id) or (None, None) if parsing fails.
+    Accepts any batch_id suffix (not restricted to dates)."""
     name_without_ext = filename.replace(".json", "")
-    
-    # Batch_id is always in format YYYY-MM-DD at the end
-    # Use regex to find date pattern at the end
-    date_pattern = r'(\d{4}-\d{2}-\d{2})$'
-    match = re.search(date_pattern, name_without_ext)
-    if not match:
+    # Split from the right once to isolate batch_id, keeping slug intact
+    parts = name_without_ext.rsplit("-", 1)
+    if len(parts) < 2:
         return (None, None)
-    
-    batch_id = match.group(1)
-    # Remove batch_id from the name to get paper-slug
-    remaining = name_without_ext[:match.start()]
-    
-    # Paper is the first part before the first dash after removing batch_id
-    # But we need to be careful - the slug can contain dashes
-    # So we check if the first part (before first dash) is a valid paper
-    parts = remaining.split("-", 1)
-    if len(parts) >= 1:
-        paper = parts[0] if parts[0] in PAPERS else None
-        return (paper, batch_id)
-    
-    return (None, None)
+    remaining, batch_id = parts[0], parts[1]
+    paper = remaining.split("-", 1)[0] if "-" in remaining else remaining
+    if paper not in PAPERS:
+        paper = None
+    return (paper, batch_id)
 
 def clean_link_scrape_exists(filename: str) -> bool:
-    """Check if a clean link scrape file already exists"""
-    path = CLEAN_LINK_SCRAPE_DIR / filename
-    return path.exists()
+    """Check if a clean link scrape file already exists (checks both new and old locations)"""
+    path = get_link_scrape_path(filename, CLEAN_LINK_SCRAPE_DIR)
+    if path.exists():
+        return True
+    # Check old location for backward compatibility
+    old_path = CLEAN_LINK_SCRAPE_DIR / filename
+    return old_path.exists()
 
 def article_scrape_exists(filename: str) -> bool:
-    """Check if an article scrape file already exists"""
-    path = ARTICLE_SCRAPE_DIR / filename
-    return path.exists()
+    """Check if an article scrape file already exists (checks both new and old locations)"""
+    path = get_article_scrape_path(filename, ARTICLE_SCRAPE_DIR)
+    if path.exists():
+        return True
+    # Check old location for backward compatibility
+    old_path = ARTICLE_SCRAPE_DIR / filename
+    return old_path.exists()
 
 def clean_article_scrape_exists(filename: str) -> bool:
-    """Check if a clean article scrape file already exists"""
-    path = CLEAN_ARTICLE_SCRAPE_DIR / filename
-    return path.exists()
+    """Check if a clean article scrape file already exists (checks both new and old locations)"""
+    path = get_article_scrape_path(filename, CLEAN_ARTICLE_SCRAPE_DIR)
+    if path.exists():
+        return True
+    # Check old location for backward compatibility
+    old_path = CLEAN_ARTICLE_SCRAPE_DIR / filename
+    return old_path.exists()
 
 def get_link_scrapes_for_batch(batch_id: str) -> list[Path]:
     """Get all link scrape files for a given batch_id"""
@@ -248,7 +303,8 @@ def get_clean_link_scrapes_for_batch(batch_id: str) -> list[Path]:
         filename = link_path.name
         _, _, file_batch_id = parse_link_scrape_filename(filename)
         if file_batch_id == batch_id:
-            clean_path = CLEAN_LINK_SCRAPE_DIR / filename
+            # Check if it's in the clean directory (could be in batch_id subdirectory or old location)
+            clean_path = get_link_scrape_path(filename, CLEAN_LINK_SCRAPE_DIR)
             if clean_path.exists():
                 matching.append(clean_path)
     return matching

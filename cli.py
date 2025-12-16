@@ -197,10 +197,15 @@ def _batch_clean_articles_impl(batch_id: str, force: bool = False):
                 continue
             
             rprint(f"[cyan]Cleaning article: {filename}...[/cyan]")
-            cleaned_content = extract_article_text(scrape.content)
+            cleaned_content, is_article = extract_article_text(scrape.content)
+            
+            if not is_article:
+                rprint(f"[yellow]⚠ Skipping non-article (listing/navigation page): {filename}[/yellow]")
+                skipped_count += 1
+                continue
             
             from utils import ScrapeData
-            clean_scrape = ScrapeData(url=scrape.url, content=cleaned_content)
+            clean_scrape = ScrapeData(url=scrape.url, content=cleaned_content, is_article=is_article)
             write_clean_article_scrape(clean_scrape, filename)
             
             rprint(f"[green]✓ Cleaned article ({len(cleaned_content)} chars)[/green]")
@@ -299,7 +304,9 @@ def clean_links(
     # Write cleaned links
     try:
         write_clean_link_scrape(filtered_links, filename)
-        rprint(f"[green]Saved cleaned links to {CLEAN_LINK_SCRAPE_DIR / filename}[/green]")
+        from utils import get_link_scrape_path
+        clean_path = get_link_scrape_path(filename, CLEAN_LINK_SCRAPE_DIR)
+        rprint(f"[green]Saved cleaned links to {clean_path}[/green]")
     except Exception as e:
         rprint(f"[red]Error writing clean link scrape: {e}[/red]")
         raise typer.Exit(1)
@@ -342,18 +349,23 @@ def clean_articles(
     # Clean article text using LLM
     rprint(f"[blue]Cleaning article text ({len(scrape.content)} chars)...[/blue]")
     try:
-        cleaned_content = extract_article_text(scrape.content)
+        cleaned_content, is_article = extract_article_text(scrape.content)
+        if not is_article:
+            rprint(f"[yellow]Not a valid article (listing/navigation page), skipping save[/yellow]")
+            return
         rprint(f"[green]Cleaned to {len(cleaned_content)} chars[/green]")
     except Exception as e:
         rprint(f"[red]Error cleaning article with LLM: {e}[/red]")
         raise typer.Exit(1)
     
-    # Write cleaned article
+    # Write cleaned article (only if it's a valid article)
     try:
         from utils import ScrapeData
-        clean_scrape = ScrapeData(url=scrape.url, content=cleaned_content)
+        clean_scrape = ScrapeData(url=scrape.url, content=cleaned_content, is_article=is_article)
         write_clean_article_scrape(clean_scrape, filename)
-        rprint(f"[green]Saved cleaned article to {CLEAN_ARTICLE_SCRAPE_DIR / filename}[/green]")
+        from utils import get_article_scrape_path
+        clean_path = get_article_scrape_path(filename, CLEAN_ARTICLE_SCRAPE_DIR)
+        rprint(f"[green]Saved cleaned article to {clean_path}[/green]")
     except Exception as e:
         rprint(f"[red]Error writing clean article scrape: {e}[/red]")
         raise typer.Exit(1)
