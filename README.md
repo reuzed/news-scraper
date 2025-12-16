@@ -6,6 +6,22 @@
 
 # CLI
 
+To learn how to use the CLI run:
+
+```bash
+uv run cli.py --help
+uv run cli.py run-batch --help
+```
+
+To run a scraping job call:
+
+```bash
+# For testing (takes 20 mins and requires you to fill CAPTCHA halfway through)
+uv run cli.py run-batch --page-limit 2 --batch-id test --article-limit 2
+# Takes longer...
+uv run cli.py run-batch --page-limit 15
+```
+
 # Pipeline will look like
 
 1. Find list of article links
