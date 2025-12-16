@@ -2,23 +2,44 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import json
+from utils import SmartLinkScrapeResult, LinkData
+from pydantic import BaseModel
 
 load_dotenv()
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-def filter_links(links: list[str]) -> list[str]:
-    response = client.responses.create(
+class FilteredLinks(BaseModel):
+    links: list[LinkData]
+    
+def filter_links(scrape_result: SmartLinkScrapeResult) -> list[LinkData]:
+    # Combine once_links and multiple_links for filtering
+    candidates = (
+        scrape_result.once_links 
+        + scrape_result.multiple_links # can comment out these links, less likely to be good
+    )
+    # Just pass the hrefs and text for the LLM to evaluate
+    link_summaries = [{"href": l.href, "text": l.text} for l in candidates]
+    
+    response = client.responses.parse(
         model="gpt-5",
         reasoning={"effort": "low"},
         instructions=(
-            "You will be given a list of links taken from a webpage on a news site."
-            "Your task is to extract the links which refer to articles."
-            "You should remove links to things like settings, homepages, advertisements"
-            ),
-        input=json.dumps(links),
+            "You will be given a list of links taken from a webpage on a news site. "
+            "Your task is to extract the links which refer to articles. "
+            "You should remove links to things like settings, homepages, advertisements. "
+            "Return only the hrefs of article links."
+            "Article links will usually have some kind of id or some article title/keywords in their link text."
+        ),
+        input=json.dumps(link_summaries),
+        text_format=FilteredLinks,
     )
-    list_text = response.output_text
-    return json.loads(list_text)
+    
+    if not response.output_parsed:
+        print("Issue in LLM link filtering, didn't get JSON back from API.")
+        return scrape_result.once_links
+    filtered_hrefs = {l.href for l in response.output_parsed.links}
+    
+    return [l for l in candidates if l.href in filtered_hrefs]
 
 def extract_article_text(article_body_text: str) -> str:
     response = client.responses.create(
