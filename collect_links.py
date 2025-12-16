@@ -5,23 +5,33 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 import time
+from datetime import datetime
 from pydantic import BaseModel
 from urllib.parse import urlparse
 import json
-from typing import Callable
+from typing import Callable, Literal
+from pathlib import Path
 
 class LinkData(BaseModel):
     text: str
     href: str
 
-# ai_topic_pages = [
-#     "https://www.thetimes.com/topic/artificial-intelligence",
-#     "https://www.thesun.co.uk/topic/artificial-intelligence/",
-#     "https://www.express.co.uk/latest/artificial-intelligence",
-#     "https://www.mirror.co.uk/all-about/artificial-intelligence",
-# ]
+Paper = Literal[
+    "thetimes",
+    "thesun",
+    "express",
+    "mirror",
+    "telegraph",
+    "theguardian",
+    "dailymail",
+    "ft",
+    "metro",
+    "independent",
+    "observer",
+    "dailystar",
+]
 
-ai_topic_page_maps = {
+ai_topic_page_maps: dict[Paper, Callable[[int], str]] = {
     "thetimes": lambda n : f"https://www.thetimes.com/topic/artificial-intelligence?page={n}",
     "thesun": lambda n : f"https://www.thesun.co.uk/topic/artificial-intelligence/page/{n}/",
     "express": lambda n : f"https://www.express.co.uk/latest/artificial-intelligence?pageNumber={n}",
@@ -123,6 +133,12 @@ def collect_link_scheme(driver: webdriver.Chrome, link_scheme: Callable[[int], s
             break
     return links
 
+class SmartLinkScrapeResult(BaseModel):
+    schema_links: list[LinkData]
+    multiple_links: list[LinkData]
+    all_links: list[LinkData]
+    once_links: list[LinkData]
+
 def smart_collect_link_scheme(driver: webdriver.Chrome, link_scheme: Callable[[int], str], page_limit = 10):
     # iterate through page numbers while we are getting new links
     # maintain the history of all scraped links
@@ -148,14 +164,38 @@ def smart_collect_link_scheme(driver: webdriver.Chrome, link_scheme: Callable[[i
             if href in [link.href for link in scrape]:
                 total += 1
         return total
-    schema_links = list(filter(lambda link: matches_scheme(link.href, len(scrape_history)), links))
-    links = list(filter(lambda link: not matches_scheme(link.href, len(scrape_history)), links))
+    schema_links = list(filter(lambda link: matches_scheme(link.href, len(scrape_history)+5), links))
+    links = list(filter(lambda link: not matches_scheme(link.href, len(scrape_history)+5), links))
     
     once_scraped_links = list(filter(lambda link: count_scrapes(link.href, scrape_history) == 1, links))
     multiple_scraped_links = list(filter(lambda link: 1 < count_scrapes(link.href, scrape_history) < len(scrape_history), links))
     always_scraped_links = list(filter(lambda link: count_scrapes(link.href, scrape_history) == len(scrape_history), links))
-    return schema_links, always_scraped_links, multiple_scraped_links, once_scraped_links
-  
+    return SmartLinkScrapeResult(
+        schema_links=schema_links, 
+        all_links=always_scraped_links, 
+        multiple_links=multiple_scraped_links, 
+        once_links=once_scraped_links
+    )
+
+def write_link_scrape(slsr: SmartLinkScrapeResult, filename: str):
+    path = Path("scrapes/links") / filename
+    with open(path, "w") as outfile:
+        outfile.write(
+            slsr.model_dump_json(indent=4)
+        )
+
+def read_link_scrape(filename: str) -> SmartLinkScrapeResult:
+    path = Path("scrapes/links") / filename
+    with open(path, "r") as outfile:
+        contents = outfile.read()
+    slsr = SmartLinkScrapeResult.model_validate_json(contents)
+    return slsr
+
+def scrape_filename(paper: Paper, page_limit: int, date=None) -> str:
+    if date is None:
+        date = datetime.now().date().isoformat()
+    return f"scrape-{paper}-{page_limit}-pages-{date}.json"
+
 if __name__ == "__main__":
     driver = setup_driver()
     # Collect links from a webpage
@@ -171,16 +211,22 @@ if __name__ == "__main__":
         
     # Collect paginated links with some more link filtering
     # url_scheme = ai_topic_page_maps["express"]
+    
+    PAPER = "ft"
+    PAGE_LIMIT = 4
     url_scheme = ai_topic_page_maps["ft"]
-    schema_links, always_scraped_links, multiple_scraped_links, once_scraped_links = smart_collect_link_scheme(driver, url_scheme, page_limit=4)
+    scrape_result= smart_collect_link_scheme(driver, url_scheme, page_limit=4)
     print(
         "Schema:" + "-"*30,
-        schema_links, 
+        scrape_result.schema_links, 
         "Every page:" + "-"*30,
-        always_scraped_links, 
+        scrape_result.all_links, 
         "Multiple pages:" + "-"*30,
-        multiple_scraped_links
+        scrape_result.multiple_links,
     )
-    with open("collected_links2.json", "w") as outfile:
-        links = list([link.model_dump() for link in once_scraped_links])
-        json.dump(links, outfile, indent=4)
+    
+    write_link_scrape(scrape_result, scrape_filename(paper=PAPER, page_limit=PAGE_LIMIT))
+    
+    slsr = read_link_scrape(scrape_filename(paper=PAPER, page_limit=PAGE_LIMIT))
+    
+    print(slsr)
