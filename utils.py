@@ -101,7 +101,7 @@ def read_clean_link_scrape(filename: str) -> list[LinkData]:
         contents = outfile.read()
     return LinkDataList.validate_json(contents)
 
-def link_scrape_filename(paper: Paper, page_limit: int, batch_id=None) -> str:
+def link_scrape_filename(paper: Paper, page_limit: int, batch_id: str|None = None) -> str:
     if batch_id is None:
         batch_id = datetime.now().date().isoformat()
     return f"scrape-{paper}-{page_limit}-pages-{batch_id}.json"
@@ -139,3 +139,96 @@ def article_scrape_filename(paper: Paper, href: str, batch_id: str | None = None
     slug = slug[:80]  # Truncate if too long
     
     return f"{paper}-{slug}-{batch_id}.json"
+
+def get_batch_id(batch_id: str | None = None) -> str:
+    """Get batch_id, defaulting to today's date if None"""
+    if batch_id is None:
+        return datetime.now().date().isoformat()
+    return batch_id
+
+def parse_link_scrape_filename(filename: str) -> tuple[Paper | None, int | None, str | None]:
+    """Parse link scrape filename to extract paper, page_limit, and batch_id.
+    Format: scrape-{paper}-{page_limit}-pages-{batch_id}.json
+    Returns (paper, page_limit, batch_id) or (None, None, None) if parsing fails"""
+    match = re.match(r"scrape-([^-]+)-(\d+)-pages-(.+)\.json", filename)
+    if match:
+        paper_str, page_limit_str, batch_id_str = match.groups()
+        paper = paper_str if paper_str in PAPERS else None
+        page_limit = int(page_limit_str) if page_limit_str.isdigit() else None
+        return (paper, page_limit, batch_id_str)
+    return (None, None, None)
+
+def parse_article_scrape_filename(filename: str) -> tuple[Paper | None, str | None]:
+    """Parse article scrape filename to extract paper and batch_id.
+    Format: {paper}-{slug}-{batch_id}.json
+    Returns (paper, batch_id) or (None, None) if parsing fails"""
+    # Extract batch_id (last part before .json)
+    parts = filename.replace(".json", "").split("-")
+    if len(parts) >= 2:
+        # Batch_id is the last part
+        batch_id = parts[-1]
+        # Paper is the first part
+        paper = parts[0] if parts[0] in PAPERS else None
+        return (paper, batch_id)
+    return (None, None)
+
+def clean_link_scrape_exists(filename: str) -> bool:
+    """Check if a clean link scrape file already exists"""
+    path = CLEAN_LINK_SCRAPE_DIR / filename
+    return path.exists()
+
+def article_scrape_exists(filename: str) -> bool:
+    """Check if an article scrape file already exists"""
+    path = ARTICLE_SCRAPE_DIR / filename
+    return path.exists()
+
+def clean_article_scrape_exists(filename: str) -> bool:
+    """Check if a clean article scrape file already exists"""
+    path = CLEAN_ARTICLE_SCRAPE_DIR / filename
+    return path.exists()
+
+def get_link_scrapes_for_batch(batch_id: str) -> list[Path]:
+    """Get all link scrape files for a given batch_id"""
+    all_links = glob_links()
+    matching = []
+    for link_path in all_links:
+        filename = link_path.name
+        _, _, file_batch_id = parse_link_scrape_filename(filename)
+        if file_batch_id == batch_id:
+            matching.append(link_path)
+    return matching
+
+def get_clean_link_scrapes_for_batch(batch_id: str) -> list[Path]:
+    """Get all clean link scrape files for a given batch_id"""
+    all_links = glob_links()
+    matching = []
+    for link_path in all_links:
+        filename = link_path.name
+        _, _, file_batch_id = parse_link_scrape_filename(filename)
+        if file_batch_id == batch_id:
+            clean_path = CLEAN_LINK_SCRAPE_DIR / filename
+            if clean_path.exists():
+                matching.append(clean_path)
+    return matching
+
+def get_article_scrapes_for_batch(batch_id: str) -> list[Path]:
+    """Get all article scrape files for a given batch_id"""
+    all_articles = glob_articles()
+    matching = []
+    for article_path in all_articles:
+        filename = article_path.name
+        _, file_batch_id = parse_article_scrape_filename(filename)
+        if file_batch_id == batch_id and "raw" in str(article_path):
+            matching.append(article_path)
+    return matching
+
+def get_clean_article_scrapes_for_batch(batch_id: str) -> list[Path]:
+    """Get all clean article scrape files for a given batch_id"""
+    all_articles = glob_articles()
+    matching = []
+    for article_path in all_articles:
+        filename = article_path.name
+        _, file_batch_id = parse_article_scrape_filename(filename)
+        if file_batch_id == batch_id and "clean" in str(article_path):
+            matching.append(article_path)
+    return matching
